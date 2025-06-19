@@ -11,3 +11,12 @@ services:
         sync: false
       - key: PYTHONPATH
         value: /opt/render/project/src
+        
+  - type: web
+    name: scrap3r-dashboard
+    env: python
+    buildCommand: pip install -r requirements.txt flask
+    startCommand: python web_dashboard.py
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
