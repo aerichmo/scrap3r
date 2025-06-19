@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List
 import aiohttp
@@ -9,9 +10,6 @@ from alpaca.data.live import StockDataStream
 from alpaca.data.models import Bar, Trade, Quote
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
-
-# Import our sentiment analysis
-from scraper import scrape_market_chatter, calculate_sentiment
 
 ALPACA_KEY = os.environ.get('ALPACA_KEY')
 ALPACA_SECRET = os.environ.get('ALPACA_SECRET')
@@ -22,65 +20,126 @@ STOP_LOSS = 0.02
 MAX_POSITION_SIZE = 100
 MIN_SENTIMENT = 0.3
 
+# Default watchlist if Reddit scraping fails
+DEFAULT_SYMBOLS = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA']
+
 class MCPTrader:
     def __init__(self):
         self.trading_client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=True)
         self.data_stream = StockDataStream(ALPACA_KEY, ALPACA_SECRET)
-        self.watched_symbols = set()
+        self.watched_symbols = set(DEFAULT_SYMBOLS)
         self.symbol_data = {}
+        self._websocket_started = False
         
     async def start(self):
         """Initialize the MCP trading system"""
         print(f"[{datetime.now()}] Starting MCP Trader...")
+        print(f"[{datetime.now()}] Using default symbols: {self.watched_symbols}")
         
-        # Get initial sentiment data
-        await self.update_sentiment()
+        # Initialize symbol data
+        for symbol in self.watched_symbols:
+            self.symbol_data[symbol] = {
+                'sentiment': 0.5,  # Neutral default
+                'mentions': 1,
+                'last_update': datetime.now()
+            }
         
-        # Subscribe to real-time data for high-sentiment stocks
+        # Subscribe to real-time data
         await self.setup_data_streams()
         
-        # Start the data stream
-        await self.data_stream.run()
-    
-    async def update_sentiment(self):
-        """Update sentiment scores from Reddit"""
-        top_tickers = scrape_market_chatter()
+        # Start monitoring positions
+        asyncio.create_task(self.monitor_positions())
         
-        for ticker_data in top_tickers:
-            symbol = ticker_data['ticker']
-            sentiment = ticker_data['sentiment']
-            
-            if sentiment >= MIN_SENTIMENT:
-                self.symbol_data[symbol] = {
-                    'sentiment': sentiment,
-                    'mentions': ticker_data['mentions'],
-                    'last_update': datetime.now()
-                }
-                self.watched_symbols.add(symbol)
-                
-        print(f"[{datetime.now()}] Watching {len(self.watched_symbols)} symbols: {self.watched_symbols}")
+        # Keep the connection alive
+        while True:
+            await asyncio.sleep(60)
+            print(f"[{datetime.now()}] MCP Trader running... Watching: {self.watched_symbols}")
     
     async def setup_data_streams(self):
         """Subscribe to real-time data streams"""
-        if not self.watched_symbols:
+        if not self.watched_symbols or self._websocket_started:
             return
             
-        # Subscribe to quotes for sentiment-positive stocks
-        self.data_stream.subscribe_quotes(self.on_quote, *self.watched_symbols)
-        self.data_stream.subscribe_trades(self.on_trade, *self.watched_symbols)
-        self.data_stream.subscribe_bars(self.on_bar, *self.watched_symbols)
+        print(f"[{datetime.now()}] Setting up data streams for: {self.watched_symbols}")
+        
+        # Subscribe handlers
+        async def handle_quote(data):
+            await self.on_quote(data)
+            
+        async def handle_trade(data):
+            await self.on_trade(data)
+            
+        async def handle_bar(data):
+            await self.on_bar(data)
+        
+        # Subscribe to data
+        self.data_stream.subscribe_quotes(handle_quote, *self.watched_symbols)
+        self.data_stream.subscribe_trades(handle_trade, *self.watched_symbols)
+        self.data_stream.subscribe_bars(handle_bar, *self.watched_symbols)
+        
+        # Start the websocket in background
+        if not self._websocket_started:
+            self._websocket_started = True
+            asyncio.create_task(self._run_websocket())
+    
+    async def _run_websocket(self):
+        """Run websocket in background"""
+        try:
+            await self.data_stream._run_forever()
+        except Exception as e:
+            print(f"[{datetime.now()}] Websocket error: {e}")
+            self._websocket_started = False
+    
+    async def monitor_positions(self):
+        """Monitor existing positions for exit conditions"""
+        while True:
+            try:
+                positions = self.trading_client.get_all_positions()
+                
+                for position in positions:
+                    current_price = float(position.current_price)
+                    avg_price = float(position.avg_entry_price)
+                    profit_pct = (current_price - avg_price) / avg_price
+                    
+                    # Check exit conditions
+                    if profit_pct >= PROFIT_TARGET:
+                        print(f"[{datetime.now()}] Taking profit on {position.symbol} at {profit_pct:.2%}")
+                        await self.close_position(position)
+                    elif profit_pct <= -STOP_LOSS:
+                        print(f"[{datetime.now()}] Stop loss on {position.symbol} at {profit_pct:.2%}")
+                        await self.close_position(position)
+                        
+            except Exception as e:
+                print(f"[{datetime.now()}] Error monitoring positions: {e}")
+                
+            await asyncio.sleep(30)  # Check every 30 seconds
+    
+    async def close_position(self, position):
+        """Close a position"""
+        try:
+            order = MarketOrderRequest(
+                symbol=position.symbol,
+                qty=position.qty,
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY
+            )
+            self.trading_client.submit_order(order)
+        except Exception as e:
+            print(f"Error closing position: {e}")
     
     async def on_quote(self, quote: Quote):
         """Handle real-time quote updates"""
         symbol = quote.symbol
         
-        # Check for tight bid-ask spread (liquidity)
+        if symbol not in self.symbol_data:
+            return
+            
+        # Update spread data
         spread = quote.ask_price - quote.bid_price
         spread_pct = spread / quote.bid_price if quote.bid_price > 0 else 1
         
-        if symbol in self.symbol_data:
-            self.symbol_data[symbol]['spread'] = spread_pct
-            self.symbol_data[symbol]['last_quote'] = quote
+        self.symbol_data[symbol]['spread'] = spread_pct
+        self.symbol_data[symbol]['last_quote'] = quote
     
     async def on_trade(self, trade: Trade):
         """Handle real-time trade data"""
@@ -89,7 +148,7 @@ class MCPTrader:
         if symbol not in self.symbol_data:
             return
             
-        # Track volume spikes
+        # Track recent trades
         if 'trades' not in self.symbol_data[symbol]:
             self.symbol_data[symbol]['trades'] = []
             
@@ -102,9 +161,6 @@ class MCPTrader:
         # Keep only last 100 trades
         if len(self.symbol_data[symbol]['trades']) > 100:
             self.symbol_data[symbol]['trades'].pop(0)
-        
-        # Check for unusual volume
-        await self.check_volume_spike(symbol)
     
     async def on_bar(self, bar: Bar):
         """Handle real-time bar data"""
@@ -113,130 +169,60 @@ class MCPTrader:
         if symbol not in self.symbol_data:
             return
             
-        # Store the bar data
+        print(f"[{datetime.now()}] Bar for {symbol}: ${bar.close:.2f} Vol:{bar.volume}")
+        
+        # Store the bar
         self.symbol_data[symbol]['last_bar'] = bar
         
-        # Check entry conditions
+        # Check if we should enter
         await self.check_entry_conditions(symbol)
     
-    async def check_volume_spike(self, symbol: str):
-        """Check for unusual volume patterns"""
-        if 'trades' not in self.symbol_data[symbol]:
-            return
-            
-        recent_trades = self.symbol_data[symbol]['trades'][-20:]
-        if len(recent_trades) < 20:
-            return
-            
-        # Calculate average trade size
-        avg_size = sum(t['size'] for t in recent_trades) / len(recent_trades)
-        
-        # Check if latest trades are significantly larger
-        latest_sizes = [t['size'] for t in recent_trades[-5:]]
-        if any(size > avg_size * 3 for size in latest_sizes):
-            self.symbol_data[symbol]['volume_spike'] = True
-            print(f"[{datetime.now()}] Volume spike detected for {symbol}")
-    
     async def check_entry_conditions(self, symbol: str):
-        """Check if we should enter a position"""
-        data = self.symbol_data.get(symbol, {})
-        
-        # Required conditions
-        if not all(k in data for k in ['sentiment', 'last_bar', 'spread']):
-            return
-            
+        """Simple entry logic for testing"""
         # Skip if we already have a position
-        positions = self.trading_client.get_all_positions()
-        if any(p.symbol == symbol for p in positions):
+        try:
+            positions = self.trading_client.get_all_positions()
+            if any(p.symbol == symbol for p in positions):
+                return
+        except:
             return
             
-        # Entry conditions
-        sentiment_good = data['sentiment'] >= MIN_SENTIMENT
-        spread_tight = data.get('spread', 1) < 0.002  # 0.2% spread
-        volume_spike = data.get('volume_spike', False)
+        data = self.symbol_data.get(symbol, {})
+        bar = data.get('last_bar')
         
-        # Price momentum (current close > previous close)
-        bar = data['last_bar']
-        momentum = bar.close > bar.open
-        
-        # Execute trade if conditions are met
-        if sentiment_good and spread_tight and (volume_spike or momentum):
+        if not bar:
+            return
+            
+        # Simple momentum check
+        if bar.close > bar.open and bar.volume > 1000000:
+            print(f"[{datetime.now()}] Momentum detected for {symbol}")
             await self.execute_trade(symbol, bar.close)
     
     async def execute_trade(self, symbol: str, price: float):
-        """Execute a trade with MCP-style smart routing"""
+        """Execute a trade"""
         try:
-            # Calculate position size
             qty = int(MAX_POSITION_SIZE / price)
             if qty < 1:
                 qty = 1
             
-            # Use limit order for better fill
-            limit_price = price * 1.001  # 0.1% above current
-            
-            order_data = LimitOrderRequest(
+            order = MarketOrderRequest(
                 symbol=symbol,
                 qty=qty,
                 side=OrderSide.BUY,
-                time_in_force=TimeInForce.IOC,  # Immediate or cancel
-                limit_price=limit_price
+                time_in_force=TimeInForce.DAY
             )
             
-            order = self.trading_client.submit_order(order_data)
-            print(f"[{datetime.now()}] MCP Trade: Bought {qty} shares of {symbol} at limit ${limit_price:.2f}")
-            
-            # Set up exit orders
-            await self.setup_exit_orders(symbol, price, qty)
+            result = self.trading_client.submit_order(order)
+            print(f"[{datetime.now()}] Bought {qty} shares of {symbol} at ~${price:.2f}")
             
         except Exception as e:
             print(f"Error executing trade for {symbol}: {e}")
-    
-    async def setup_exit_orders(self, symbol: str, entry_price: float, qty: int):
-        """Set up take-profit and stop-loss orders"""
-        try:
-            # Take profit order
-            tp_price = entry_price * (1 + PROFIT_TARGET)
-            tp_order = LimitOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=OrderSide.SELL,
-                time_in_force=TimeInForce.GTC,
-                limit_price=tp_price
-            )
-            self.trading_client.submit_order(tp_order)
-            
-            # Stop loss order
-            sl_price = entry_price * (1 - STOP_LOSS)
-            sl_order = LimitOrderRequest(
-                symbol=symbol,
-                qty=qty,
-                side=OrderSide.SELL,
-                time_in_force=TimeInForce.GTC,
-                limit_price=sl_price
-            )
-            self.trading_client.submit_order(sl_order)
-            
-            print(f"[{datetime.now()}] Exit orders set - TP: ${tp_price:.2f}, SL: ${sl_price:.2f}")
-            
-        except Exception as e:
-            print(f"Error setting exit orders: {e}")
 
 async def main():
-    """Main entry point for MCP trader"""
+    """Main entry point"""
     trader = MCPTrader()
-    
-    # Update sentiment every 30 minutes
-    async def sentiment_updater():
-        while True:
-            await trader.update_sentiment()
-            await trader.setup_data_streams()
-            await asyncio.sleep(1800)  # 30 minutes
-    
-    # Run both the trader and sentiment updater
-    await asyncio.gather(
-        trader.start(),
-        sentiment_updater()
-    )
+    await trader.start()
 
 if __name__ == "__main__":
+    # Run the trader
     asyncio.run(main())

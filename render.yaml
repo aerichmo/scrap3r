@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: scrap3r-mcp-trader
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python mcp_trader.py
+    envVars:
+      - key: ALPACA_KEY
+        sync: false
+      - key: ALPACA_SECRET
+        sync: false
