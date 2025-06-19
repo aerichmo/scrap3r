@@ -1,0 +1,26 @@
+name: Position Monitor
+
+on:
+  schedule:
+    - cron: '*/15 13-20 * * 1-5'  # Every 15 minutes during market hours (9 AM - 4 PM EST)
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+    
+    - name: Monitor positions
+      env:
+        ALPACA_KEY: ${{ secrets.SCRAP3R_KEY }}
+        ALPACA_SECRET: ${{ secrets.SCRAP3R_SECRET }}
+      run: python -c "from scraper import check_existing_positions; check_existing_positions()"
