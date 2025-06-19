@@ -102,7 +102,7 @@ Deploy as a background worker using `render.yaml`
 SCRAP3R includes a web dashboard for monitoring errors:
 
 ### Dashboard URL
-When deployed to Render: `https://scrap3r-dashboard.onrender.com`
+https://scrap3r.onrender.com
 
 ### Features
 - Real-time error tracking

@@ -15,7 +15,7 @@ services:
   - type: web
     name: scrap3r-dashboard
     env: python
-    buildCommand: pip install -r requirements.txt flask
+    buildCommand: pip install -r requirements.txt
     startCommand: python web_dashboard.py
     envVars:
       - key: PYTHONPATH
