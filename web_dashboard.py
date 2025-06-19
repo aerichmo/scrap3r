@@ -191,7 +191,7 @@ DASHBOARD_HTML = """
         </div>
         
         <div class="refresh-info">
-            Auto-refresh every 30 seconds. Last update: <span id="last-update">Never</span>
+            <span id="refresh-status">Auto-refresh during trading hours</span>. Last update: <span id="last-update">Never</span>
         </div>
     </div>
 
@@ -314,8 +314,48 @@ DASHBOARD_HTML = """
         // Initial load
         fetchData();
         
-        // Auto-refresh every 30 seconds
-        autoRefresh = setInterval(fetchData, 30000);
+        // Auto-refresh every 5 minutes during trading hours only
+        autoRefresh = startAutoRefresh();
+        
+        function isMarketHours() {
+            const now = new Date();
+            const day = now.getDay();
+            const hour = now.getHours();
+            const minute = now.getMinutes();
+            
+            // Skip weekends (0 = Sunday, 6 = Saturday)
+            if (day === 0 || day === 6) return false;
+            
+            // Convert to ET (assuming server is in UTC)
+            const etHour = hour - 5; // Simplified - doesn't handle DST
+            
+            // Market hours: 9:30 AM - 4:00 PM ET
+            // Pre-market starts at 4:00 AM ET
+            if (etHour < 4 || etHour >= 16) return false;
+            if (etHour === 9 && minute < 30) return false;
+            
+            return true;
+        }
+        
+        function startAutoRefresh() {
+            return setInterval(() => {
+                if (isMarketHours()) {
+                    fetchData();
+                }
+                updateRefreshStatus();
+            }, 5 * 60 * 1000); // 5 minutes
+        }
+        
+        function updateRefreshStatus() {
+            const statusEl = document.getElementById('refresh-status');
+            if (isMarketHours()) {
+                statusEl.textContent = 'Auto-refresh active (every 5 min)';
+                statusEl.style.color = '#4CAF50';
+            } else {
+                statusEl.textContent = 'Auto-refresh paused (market closed)';
+                statusEl.style.color = '#666';
+            }
+        }
         
         // Stop auto-refresh when page is hidden
         document.addEventListener('visibilitychange', () => {
@@ -323,9 +363,12 @@ DASHBOARD_HTML = """
                 clearInterval(autoRefresh);
             } else {
                 fetchData();
-                autoRefresh = setInterval(fetchData, 30000);
+                autoRefresh = startAutoRefresh();
             }
         });
+        
+        // Update refresh status on load
+        updateRefreshStatus();
     </script>
 </body>
 </html>

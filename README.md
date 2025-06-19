@@ -101,28 +101,16 @@ Deploy as a background worker using `render.yaml`
 
 SCRAP3R includes a web dashboard for monitoring errors:
 
-### Local Dashboard
-```bash
-# Test error logging
-python test_dashboard.py
-
-# Run the dashboard
-python web_dashboard.py
-
-# Open in browser
-http://localhost:5000
-```
-
-### Production Dashboard
-When deployed to Render, the dashboard will be available at:
-- `https://scrap3r-dashboard.onrender.com`
+### Dashboard URL
+When deployed to Render: `https://scrap3r-dashboard.onrender.com`
 
 ### Features
 - Real-time error tracking
 - Critical error alerts
 - Download error logs for debugging
 - Clear error history
-- Auto-refresh every 30 seconds
+- Auto-refresh every 5 minutes during trading hours only
+- No refresh outside market hours (4 AM - 4 PM ET)
 
 ## Testing
 
