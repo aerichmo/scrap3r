@@ -1,0 +1,36 @@
+name: MCP Trader Deployment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'mcp_trader.py'
+      - 'requirements.txt'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: true
+    
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        cd alpaca-mcp-server && pip install -r requirements.txt
+    
+    - name: Run MCP Trader (Demo Mode)
+      env:
+        ALPACA_KEY: ${{ secrets.SCRAP3R_KEY }}
+        ALPACA_SECRET: ${{ secrets.SCRAP3R_SECRET }}
+      run: |
+        echo "MCP Trader configured successfully!"
+        echo "Note: Full MCP trader requires persistent connection"
+        echo "Deploy to cloud service (Railway/Render) for production"
+        python -c "from mcp_trader import MCPTrader; trader = MCPTrader(); print('MCP Trader initialized')"
