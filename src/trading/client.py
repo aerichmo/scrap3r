@@ -7,6 +7,7 @@ import logging
 
 from ..config import Settings
 from ..models.trade import Trade
+from ..utils.exceptions import TradingError, APIError
 
 
 logger = logging.getLogger(__name__)
@@ -17,32 +18,49 @@ class TradingClient:
     
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.client = AlpacaTradingClient(
-            settings.alpaca.api_key,
-            settings.alpaca.api_secret,
-            paper=settings.trading.paper_trading
-        )
-        self.data_stream = StockDataStream(
-            settings.alpaca.api_key,
-            settings.alpaca.api_secret
-        )
+        try:
+            self.client = AlpacaTradingClient(
+                settings.alpaca.api_key,
+                settings.alpaca.api_secret,
+                paper=settings.trading.paper_trading
+            )
+            self.data_stream = StockDataStream(
+                settings.alpaca.api_key,
+                settings.alpaca.api_secret
+            )
+            
+            # Test connection
+            account = self.client.get_account()
+            logger.info(f"Connected to Alpaca - Account: {account.account_number}, "
+                       f"Buying Power: ${float(account.buying_power):,.2f}")
+                       
+        except Exception as e:
+            raise TradingError(f"Failed to initialize Alpaca client: {str(e)}")
         
     def get_account(self):
         """Get account information"""
-        return self.client.get_account()
+        try:
+            return self.client.get_account()
+        except Exception as e:
+            raise APIError(f"Failed to get account info: {str(e)}")
         
     def get_positions(self):
         """Get all positions"""
-        return self.client.get_all_positions()
+        try:
+            return self.client.get_all_positions()
+        except Exception as e:
+            raise APIError(f"Failed to get positions: {str(e)}")
         
     def get_position(self, symbol: str):
         """Get position for specific symbol"""
         try:
             return self.client.get_position(symbol)
-        except:
+        except Exception as e:
+            # Position not found is not critical
+            logger.debug(f"No position found for {symbol}: {e}")
             return None
             
-    def place_market_order(self, trade: Trade) -> Optional[str]:
+    def place_market_order(self, trade: Trade) -> str:
         """Place a market order"""
         try:
             order_request = MarketOrderRequest(
@@ -53,14 +71,13 @@ class TradingClient:
             )
             
             order = self.client.submit_order(order_request)
-            logger.info(f"Market order placed: {trade.symbol} {trade.side} {trade.quantity}")
+            logger.info(f"Market order placed: {trade.symbol} {trade.side} {trade.quantity} - Order ID: {order.id}")
             return order.id
             
         except Exception as e:
-            logger.error(f"Error placing market order: {e}")
-            return None
+            raise TradingError(f"Failed to place market order for {trade.symbol}: {str(e)}")
             
-    def place_limit_order(self, trade: Trade, limit_price: float) -> Optional[str]:
+    def place_limit_order(self, trade: Trade, limit_price: float) -> str:
         """Place a limit order"""
         try:
             order_request = LimitOrderRequest(
@@ -72,12 +89,11 @@ class TradingClient:
             )
             
             order = self.client.submit_order(order_request)
-            logger.info(f"Limit order placed: {trade.symbol} {trade.side} {trade.quantity} @ {limit_price}")
+            logger.info(f"Limit order placed: {trade.symbol} {trade.side} {trade.quantity} @ ${limit_price} - Order ID: {order.id}")
             return order.id
             
         except Exception as e:
-            logger.error(f"Error placing limit order: {e}")
-            return None
+            raise TradingError(f"Failed to place limit order for {trade.symbol}: {str(e)}")
             
     def close_position(self, symbol: str) -> bool:
         """Close a position"""
@@ -86,15 +102,33 @@ class TradingClient:
             logger.info(f"Position closed: {symbol}")
             return True
         except Exception as e:
-            logger.error(f"Error closing position {symbol}: {e}")
+            # Log but don't crash - position might already be closed
+            logger.error(f"Failed to close position {symbol}: {e}")
             return False
             
     def close_all_positions(self) -> bool:
-        """Close all positions"""
+        """Close all positions - used in emergency shutdown"""
         try:
+            positions = self.get_positions()
+            if not positions:
+                logger.info("No positions to close")
+                return True
+                
+            logger.warning(f"Closing {len(positions)} positions...")
             self.client.close_all_positions()
-            logger.info("All positions closed")
+            logger.info("All positions closed successfully")
             return True
+            
         except Exception as e:
-            logger.error(f"Error closing all positions: {e}")
+            logger.error(f"Failed to close all positions: {e}")
+            # Try to close individually
+            try:
+                positions = self.get_positions()
+                for position in positions:
+                    try:
+                        self.close_position(position.symbol)
+                    except Exception as pe:
+                        logger.error(f"Failed to close {position.symbol}: {pe}")
+            except:
+                pass
             return False

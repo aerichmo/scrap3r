@@ -4,6 +4,7 @@ import logging
 
 from ..config import Settings
 from ..models.position import Position
+from ..utils.exceptions import PositionError, APIError
 
 
 logger = logging.getLogger(__name__)
@@ -36,10 +37,14 @@ class PositionManager:
             # Remove closed positions
             closed_symbols = set(self.positions.keys()) - current_symbols
             for symbol in closed_symbols:
+                logger.info(f"Position closed: {symbol}")
                 del self.positions[symbol]
                 
+        except APIError:
+            # Re-raise API errors as they're critical
+            raise
         except Exception as e:
-            logger.error(f"Error updating positions: {e}")
+            raise PositionError(f"Failed to update positions: {str(e)}")
             
     def get_position(self, symbol: str) -> Optional[Position]:
         """Get position for symbol"""
@@ -61,39 +66,64 @@ class PositionManager:
         """Check all positions for exit conditions"""
         exits = []
         
-        for symbol, position in self.positions.items():
-            profit_pct = position.get_profit_percentage()
+        try:
+            for symbol, position in self.positions.items():
+                # Validate position data
+                if position.avg_entry_price <= 0:
+                    logger.error(f"Invalid entry price for {symbol}: {position.avg_entry_price}")
+                    continue
+                    
+                profit_pct = position.get_profit_percentage()
+                
+                # Check profit target
+                if profit_pct >= self.settings.trading.profit_target:
+                    exits.append({
+                        'symbol': symbol,
+                        'reason': 'profit_target',
+                        'profit_pct': profit_pct,
+                        'current_price': position.current_price,
+                        'entry_price': position.avg_entry_price
+                    })
+                    logger.info(f"Profit target reached for {symbol}: {profit_pct:.2%} "
+                              f"(Entry: ${position.avg_entry_price:.2f}, Current: ${position.current_price:.2f})")
+                    
+                # Check stop loss
+                elif profit_pct <= -self.settings.trading.stop_loss:
+                    exits.append({
+                        'symbol': symbol,
+                        'reason': 'stop_loss',
+                        'profit_pct': profit_pct,
+                        'current_price': position.current_price,
+                        'entry_price': position.avg_entry_price
+                    })
+                    logger.warning(f"Stop loss triggered for {symbol}: {profit_pct:.2%} "
+                                 f"(Entry: ${position.avg_entry_price:.2f}, Current: ${position.current_price:.2f})")
+                    
+        except Exception as e:
+            # Don't crash on exit check errors - log and continue
+            logger.error(f"Error checking exit conditions: {e}")
             
-            # Check profit target
-            if profit_pct >= self.settings.trading.profit_target:
-                exits.append({
-                    'symbol': symbol,
-                    'reason': 'profit_target',
-                    'profit_pct': profit_pct
-                })
-                logger.info(f"Profit target reached for {symbol}: {profit_pct:.2%}")
-                
-            # Check stop loss
-            elif profit_pct <= -self.settings.trading.stop_loss:
-                exits.append({
-                    'symbol': symbol,
-                    'reason': 'stop_loss',
-                    'profit_pct': profit_pct
-                })
-                logger.info(f"Stop loss triggered for {symbol}: {profit_pct:.2%}")
-                
         return exits
         
     def get_portfolio_value(self) -> float:
         """Get total portfolio value"""
-        total = 0.0
-        for position in self.positions.values():
-            total += position.market_value
-        return total
+        try:
+            total = 0.0
+            for position in self.positions.values():
+                if position.market_value > 0:
+                    total += position.market_value
+            return total
+        except Exception as e:
+            logger.error(f"Error calculating portfolio value: {e}")
+            return 0.0
         
     def get_portfolio_pnl(self) -> float:
         """Get total unrealized P&L"""
-        total = 0.0
-        for position in self.positions.values():
-            total += position.unrealized_pnl
-        return total
+        try:
+            total = 0.0
+            for position in self.positions.values():
+                total += position.unrealized_pnl
+            return total
+        except Exception as e:
+            logger.error(f"Error calculating portfolio P&L: {e}")
+            return 0.0
