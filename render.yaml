@@ -16,7 +16,7 @@ services:
     name: scrap3r-dashboard
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python web_dashboard.py
+    startCommand: gunicorn web_dashboard:app
     envVars:
       - key: PYTHONPATH
         value: /opt/render/project/src

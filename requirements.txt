@@ -5,3 +5,4 @@ aiohttp==3.9.1
 websockets==11.0.3
 python-dotenv==1.0.0
 flask==3.0.0
+gunicorn==21.2.0
