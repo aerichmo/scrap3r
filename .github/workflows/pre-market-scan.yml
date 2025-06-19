@@ -17,10 +17,10 @@ jobs:
     
     - name: Install dependencies
       run: |
-        pip install alpaca-py requests beautifulsoup4
+        pip install -r requirements.txt
     
     - name: Run pre-market scanner
       env:
         ALPACA_KEY: ${{ secrets.SCRAP3R_KEY }}
         ALPACA_SECRET: ${{ secrets.SCRAP3R_SECRET }}
-      run: python scraper.py
+      run: python run_scraper.py

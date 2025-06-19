@@ -1,39 +1,109 @@
-# SCRAP3R - Sentiment-Driven Trading Bot
+# SCRAP3R - Autonomous Stock Trading Bot
 
-An autonomous trading bot that analyzes Reddit sentiment and executes trades using Alpaca's MCP infrastructure.
+An intelligent trading bot that executes trades based on market sentiment and real-time data analysis.
+
+## Architecture
+
+```
+SCRAP3R/
+├── src/
+│   ├── config/        # Configuration management
+│   ├── trading/       # Trading logic and execution
+│   ├── sentiment/     # Market sentiment analysis
+│   ├── data/          # Real-time data handling
+│   ├── models/        # Data models
+│   └── utils/         # Utilities and helpers
+├── main.py            # Main application (real-time trading)
+├── run_scraper.py     # Sentiment-based scanner (scheduled)
+└── requirements.txt   # Dependencies
+```
 
 ## Features
 
-- **Sentiment Analysis**: Scrapes Reddit WSB for bullish/bearish sentiment
-- **MCP Integration**: Uses Alpaca's Model Context Protocol for smart execution
-- **Real-time Data**: WebSocket streams for live quotes, trades, and bars
-- **Risk Management**: Automatic profit-taking (5%) and stop-loss (2%)
-- **Volume Detection**: Identifies unusual trading volume for better entries
+- **Modular Architecture**: Clean separation of concerns with organized modules
+- **Sentiment Analysis**: Scrapes Reddit for market sentiment
+- **Real-time Trading**: WebSocket integration for live market data
+- **Risk Management**: Position sizing, stop-loss, and profit targets
+- **Multi-position Support**: Manage multiple positions simultaneously
+- **Automated Monitoring**: Continuous position monitoring and exit management
 
 ## Components
 
-1. **scraper.py** - Pre-market sentiment analysis (runs at 6:30 AM EST)
-2. **mcp_trader.py** - Real-time trading with MCP integration
-3. **GitHub Actions** - Automated scheduling and deployment
+### Configuration (`src/config/`)
+- `settings.py`: Centralized configuration management
+- `constants.py`: Application-wide constants
 
-## Setup
+### Trading (`src/trading/`)
+- `client.py`: Alpaca API wrapper
+- `position_manager.py`: Position tracking and P&L management
+- `risk_manager.py`: Risk controls and validation
 
-1. Add secrets to GitHub repository:
-   - `SCRAP3R_KEY` - Alpaca API key
-   - `SCRAP3R_SECRET` - Alpaca API secret
+### Sentiment Analysis (`src/sentiment/`)
+- `analyzer.py`: Text sentiment analysis
+- `reddit_scraper.py`: Reddit data collection
 
-2. Deploy MCP trader to persistent service (Railway/Render recommended)
+### Data (`src/data/`)
+- `stream_handler.py`: Real-time market data processing
 
-## Trading Logic
+### Models (`src/models/`)
+- `trade.py`: Trade order representation
+- `position.py`: Position tracking
+- `signal.py`: Trading signal generation
 
-- Monitors Reddit for ticker mentions
-- Calculates sentiment score based on keywords
-- Only trades when sentiment > 30% positive
-- Enters on volume spikes or price momentum
-- Exits at 5% profit or 2% loss
+## Installation
 
-## Safety
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-- Uses Alpaca paper trading by default
-- Limited to $100 per position
-- One position at a time per symbol
+3. Set up environment variables:
+   ```bash
+   export ALPACA_KEY=your_alpaca_key
+   export ALPACA_SECRET=your_alpaca_secret
+   ```
+
+## Usage
+
+### Real-time Trading Bot
+```bash
+python main.py
+```
+
+### Sentiment Scanner (for scheduled runs)
+```bash
+python run_scraper.py
+```
+
+### Local Development
+```bash
+./run_local.sh
+```
+
+## Configuration
+
+Key settings in `src/config/settings.py`:
+- `profit_target`: Target profit percentage (default: 5%)
+- `stop_loss`: Stop loss percentage (default: 2%)
+- `max_positions`: Maximum concurrent positions (default: 5)
+- `min_sentiment`: Minimum sentiment score to trade (default: 0.3)
+
+## Deployment
+
+### GitHub Actions
+Automated pre-market scanning at 6:30 AM EST via `.github/workflows/pre-market-scan.yml`
+
+### Render
+Deploy as a background worker using `render.yaml`
+
+## Testing
+
+Run tests (when implemented):
+```bash
+pytest tests/
+```
+
+## License
+
+Private repository - All rights reserved

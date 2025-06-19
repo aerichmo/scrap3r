@@ -15,6 +15,6 @@ export $(cat .env | xargs)
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the MCP trader
-echo "Starting SCRAP3R MCP Trader..."
-python mcp_trader.py
+# Run the trader
+echo "Starting SCRAP3R Trading Bot..."
+python main.py
