@@ -1,0 +1,26 @@
+name: Pre-Market Scanner
+
+on:
+  schedule:
+    - cron: '30 10 * * 1-5'  # 6:30 AM EST (10:30 UTC) Monday-Friday
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install alpaca-py requests beautifulsoup4
+    
+    - name: Run pre-market scanner
+      env:
+        ALPACA_KEY: ${{ secrets.SCRAP3R_KEY }}
+        ALPACA_SECRET: ${{ secrets.SCRAP3R_SECRET }}
+      run: python scraper.py
